@@ -8,6 +8,7 @@ package-lock.json
 # Production builds
 /dist
 /build
+PROJECT_PLAN.md
 
 # Environment variables
 .env
