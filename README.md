@@ -1,11 +1,11 @@
-# 🎤📚 Voice-to-Voice Study Buddy
+# 🎤📚 Study Buddy
 
 > Transform any document into a natural conversation. Upload, read, and learn through hands-free voice interactions with AI.
 
 ## ✨ Features
 
 ### 🗣️ **Voice-First Learning**
-- **Hands-free operation**: Press `SPACEBAR` anywhere to start talking
+- **Hands-free operation**: Press `ctrl+SPACEBAR` anywhere to start talking
 - **Natural conversations**: Ask questions and hear AI responses
 - **Global voice control**: Unified voice system prevents audio conflicts
 - **ElevenLabs TTS**: Professional, natural-sounding speech synthesis
@@ -26,8 +26,8 @@
 
 1. **Clone and install**:
    ```bash
-   git clone https://github.com/yourusername/voice-study-buddy.git
-   cd voice-study-buddy
+   git clone https://github.com/yourusername/Study-Buddy.git
+   cd Study-Buddy
    npm install
    ```
 
@@ -45,7 +45,7 @@
 
 4. **Start learning**:
    - Upload any document (PDF, Word, etc.)
-   - Press `SPACEBAR` and ask: "What's this about?"
+   - Press `ctrl + SPACEBAR` and ask: "What's this about?"
    - Listen to the AI explain and ask follow-ups naturally
 
 ## 🎯 Use Cases
@@ -103,4 +103,4 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ---
 
-**Voice-to-Voice Study Buddy** - Because learning should sound as natural as curiosity itself. 🎤📚🤖 
+**Study Buddy** - Because learning should sound as natural as curiosity itself. 🎤📚🤖 
