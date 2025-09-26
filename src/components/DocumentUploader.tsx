@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { Upload, FileText, AlertCircle, Brain, BookOpen, Zap, Users, MessageCircle, Lightbulb, Target, ArrowRight, Play, Star, CheckCircle } from 'lucide-react';
+import { Upload, FileText, AlertCircle, Brain, BookOpen, Zap, Users, MessageCircle, Lightbulb, Target, ArrowRight, Play, Star, CheckCircle, Mic, Send } from 'lucide-react';
 
 interface DocumentUploaderProps {
   onFileUpload: (file: File) => Promise<void>;
@@ -122,36 +122,69 @@ export function DocumentUploader({ onFileUpload, isLoading, processingProgress =
         
         <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-16">
           {/* Header */}
-          <div className="text-center mb-16">
-            <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-3xl mb-8 shadow-xl">
-              <Brain className="w-10 h-10 text-white" />
-            </div>
-            <h1 className="text-5xl lg:text-6xl font-bold text-gray-900 mb-6 leading-tight">
-              Study Smarter,
-              <span className="bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent"> Together</span>
-            </h1>
-            <p className="text-xl lg:text-2xl text-gray-600 mb-8 max-w-3xl mx-auto leading-relaxed">
-              Transform any document into an interactive learning experience with AI-powered insights, 
-              collaborative discussions, and personalized study guidance.
-            </p>
-            
-            {/* Social Proof */}
-            <div className="flex items-center justify-center gap-6 mb-12">
-              <div className="flex items-center gap-2">
-                <div className="flex -space-x-2">
-                  {[1,2,3,4].map(i => (
-                    <div key={i} className="w-8 h-8 bg-gradient-to-br from-indigo-400 to-purple-500 rounded-full border-2 border-white flex items-center justify-center">
-                      <span className="text-white text-xs font-medium">{String.fromCharCode(64 + i)}</span>
-                    </div>
-                  ))}
-                </div>
-                <span className="text-sm text-gray-600 ml-2">Join 10,000+ students</span>
+          <div className="relative grid gap-16 lg:grid-cols-[minmax(0,3fr),minmax(0,2fr)] items-center mb-16">
+            <div className="text-center lg:text-left">
+              <div className="inline-flex items-center gap-2 rounded-full bg-white/80 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-purple-600 shadow-sm">
+                <span className="h-2 w-2 rounded-full bg-purple-500"></span>
+                New: Dual voice & text co-pilot
               </div>
-              <div className="flex items-center gap-1">
-                {[1,2,3,4,5].map(i => (
-                  <Star key={i} className="w-4 h-4 fill-yellow-400 text-yellow-400" />
-                ))}
-                <span className="text-sm text-gray-600 ml-1">4.9/5 rating</span>
+              <h1 className="mt-6 text-5xl font-bold tracking-tight text-gray-900 sm:text-6xl">
+                Learn out loud.
+                <span className="text-slate-500"> Think in text.</span>
+              </h1>
+              <p className="mt-6 text-lg leading-8 text-gray-600 sm:text-xl">
+                Upload a document and study alongside an AI partner that follows your focus. Ask questions by voice or text, with answers grounded in what’s on your screen.
+              </p>
+
+              <div className="mt-10 flex flex-wrap items-center gap-4">
+                <div className="inline-flex items-center gap-3 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-600 shadow-sm">
+                  <Mic className="h-4 w-4 text-purple-600" />
+                  <div>
+                    <p className="font-medium text-gray-800">Voice-first experience</p>
+                    <p className="text-xs">Press Ctrl+SPACE anywhere to talk</p>
+                  </div>
+                </div>
+                <div className="inline-flex items-center gap-3 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-600 shadow-sm">
+                  <Send className="h-4 w-4 text-indigo-600" />
+                  <div>
+                    <p className="font-medium text-gray-800">Text co-pilot</p>
+                    <p className="text-xs">Type questions without leaving the page</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="relative grid gap-4 rounded-3xl border border-gray-200 bg-white/90 p-6 shadow-xl backdrop-blur">
+              <div className="flex items-center gap-3">
+                <div className="rounded-2xl bg-purple-100 p-3 text-purple-600">
+                  <Brain className="h-6 w-6" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-purple-700">Context-aware answers</p>
+                  <p className="text-xs text-gray-500">Knows the page you’re viewing and highlighted text</p>
+                </div>
+              </div>
+              <div className="rounded-2xl bg-gray-50 p-4 text-left text-sm text-gray-700 shadow-inner">
+                <p className="font-medium text-gray-900">"What problem does chapter 3 focus on solving?"</p>
+                <p className="mt-2 text-gray-600">
+                  It maps how cross-team coordination breaks down in large group projects and introduces a framework for streamlining role clarity...
+                </p>
+              </div>
+              <div className="grid gap-3 text-sm text-gray-600">
+                <div className="flex items-start gap-3">
+                  <div className="mt-1 h-2 w-2 rounded-full bg-indigo-500"></div>
+                  <div>
+                    <p className="font-semibold text-gray-800">Short context</p>
+                    <p>We automatically pass only the page (and selection) in view for fast, affordable answers.</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3">
+                  <div className="mt-1 h-2 w-2 rounded-full bg-purple-500"></div>
+                  <div>
+                    <p className="font-semibold text-gray-800">Extended context</p>
+                    <p>Toggle the "Extended" switch to include chapter summaries when you need deeper insight.</p>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

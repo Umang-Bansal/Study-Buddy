@@ -3,25 +3,28 @@
  * If the environment variable is missing the function will throw – callers should
  * catch and fallback to offline mock.
  */
+import { config } from '../config/env';
+import { logger } from '../lib/logger';
+
 export async function callGemini(
   prompt: string,
   context: string = '',
-  {
-    model = 'gemini-2.5-flash', // change to the exact 2.5-flash model string when GA
-    temperature = 0.7,
-    maxOutputTokens = 1024
-  }: {
+  options: {
     model?: string;
     temperature?: number;
     maxOutputTokens?: number;
   } = {}
 ): Promise<string> {
-  const apiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY as string | undefined;
+  const apiKey = config.geminiApiKey;
   if (!apiKey) {
     throw new Error('Missing VITE_GEMINI_API_KEY');
   }
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const resolvedModel = options.model || config.geminiModel;
+  const temperature = options.temperature ?? 0.7;
+  const maxOutputTokens = options.maxOutputTokens ?? 1024;
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${resolvedModel}:generateContent?key=${apiKey}`;
 
   const userContent = `${context ? `Context:\n${context}\n---\n` : ''}${prompt}`;
 
@@ -49,17 +52,25 @@ export async function callGemini(
 
   if (!res.ok) {
     const errorText = await res.text();
+    logger.error('Gemini API error:', res.status, errorText);
     throw new Error(`Gemini API error: ${res.status} ${errorText}`);
   }
 
   const data = await res.json();
-  const text: string | undefined = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  // Aggregate all text parts if present
+  const parts: string[] = data?.candidates?.[0]?.content?.parts
+    ?.map((p: any) => (typeof p?.text === 'string' ? p.text : ''))
+    ?.filter((t: string) => t && t.trim().length > 0) || [];
+
+  const text = parts.join('\n').trim();
 
   if (!text) {
-    throw new Error('Gemini API returned no text');
+    // Bubble up a clearer message with any safety or finish reason
+    const finishReason = data?.candidates?.[0]?.finishReason || data?.candidates?.[0]?.safetyRatings?.[0]?.category;
+    throw new Error(`Gemini API returned no text${finishReason ? ` (reason: ${finishReason})` : ''}`);
   }
 
-  return text.trim();
+  return text;
 } 
 
 /**
@@ -69,22 +80,22 @@ export async function callGemini(
 export async function callGeminiWithAudio(
   audioBlob: Blob,
   context: string = '',
-  {
-    model = 'gemini-2.5-flash',
-    temperature = 0.7,
-    maxOutputTokens = 1024
-  }: {
+  options: {
     model?: string;
     temperature?: number;
     maxOutputTokens?: number;
   } = {}
 ): Promise<string> {
-  const apiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY as string | undefined;
+  const apiKey = config.geminiApiKey;
   if (!apiKey) {
     throw new Error('Missing VITE_GEMINI_API_KEY');
   }
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const resolvedModel = options.model || config.geminiModel;
+  const temperature = options.temperature ?? 0.7;
+  const maxOutputTokens = options.maxOutputTokens ?? 1024;
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${resolvedModel}:generateContent?key=${apiKey}`;
 
   // Convert audio blob to base64
   const audioBase64 = await new Promise<string>((resolve, reject) => {
@@ -135,6 +146,7 @@ export async function callGeminiWithAudio(
 
   if (!res.ok) {
     const errorText = await res.text();
+    logger.error('Gemini Audio API error:', res.status, errorText);
     throw new Error(`Gemini API error: ${res.status} ${errorText}`);
   }
 
@@ -199,3 +211,52 @@ export async function callElevenLabsTTS(
 
   return await res.arrayBuffer();
 } 
+
+/**
+ * Call Google Cloud Text-to-Speech via REST.
+ * Requires VITE_GOOGLE_TTS_API_KEY. Returns MP3 audio bytes.
+ */
+/**
+ * Call Groq TTS (PlayAI) using OpenAI-compatible endpoint.
+ */
+export async function callGroqTTS(
+  text: string,
+  {
+    model = 'playai-tts',
+    voice = 'Aaliyah-PlayAI',
+    responseFormat = 'mp3'
+  }: {
+    model?: string;
+    voice?: string;
+    responseFormat?: 'mp3' | 'wav';
+  } = {}
+): Promise<ArrayBuffer> {
+  const apiKey = (import.meta as any).env?.VITE_GROQ_API_KEY as string | undefined;
+  if (!apiKey) {
+    throw new Error('Missing VITE_GROQ_API_KEY');
+  }
+
+  const url = 'https://api.groq.com/openai/v1/audio/speech';
+  const body = {
+    model,
+    voice,
+    input: text,
+    response_format: responseFormat
+  };
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`
+    },
+    body: JSON.stringify(body)
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw new Error(`Groq TTS API error: ${res.status} ${errorText}`);
+  }
+
+  return await res.arrayBuffer();
+}

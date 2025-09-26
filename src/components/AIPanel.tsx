@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { X, Send, Bot, User } from 'lucide-react';
 import { Document } from '../types';
-import { useAI } from '../hooks/useAI';
+import { useAssistant } from '../assistant/useAssistant';
 
 interface AIPanelProps {
   document: Document;
@@ -14,7 +14,7 @@ export function AIPanel({ document, selectedText, query, onClose }: AIPanelProps
   const [message, setMessage] = useState(query || '');
   const [conversations, setConversations] = useState<Array<{ query: string; response: string; timestamp: Date }>>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const { generateResponse, isLoading } = useAI();
+  const { generate, isLoading } = useAssistant();
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -37,8 +37,12 @@ export function AIPanel({ document, selectedText, query, onClose }: AIPanelProps
     setMessage('');
 
     try {
-      const context = selectedText || document.content.slice(0, 3000);
-      const response = await generateResponse(currentMessage, context, 'question');
+      const response = await generate({
+        mode: 'question',
+        query: currentMessage,
+        document,
+        selectedText
+      });
       
       setConversations(prev => [...prev, {
         query: currentMessage,

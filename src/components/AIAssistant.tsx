@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, Bot, User, Sparkles } from 'lucide-react';
-import { useAI } from '../hooks/useAI';
+import { useAssistant } from '../assistant/useAssistant';
 
 interface AIAssistantProps {
   documentContent: string;
@@ -11,12 +11,7 @@ interface AIAssistantProps {
 export function AIAssistant({ documentContent, documentTitle, selectedText }: AIAssistantProps) {
   const [message, setMessage] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const { 
-    responses, 
-    isLoading, 
-    askQuestion,
-    clearResponses 
-  } = useAI();
+  const { responses, isLoading, generate, clear: clearResponses } = useAssistant();
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -30,8 +25,7 @@ export function AIAssistant({ documentContent, documentTitle, selectedText }: AI
     e.preventDefault();
     if (!message.trim() || isLoading) return;
 
-    const context = selectedText || documentContent.slice(0, 3000);
-    await askQuestion(message, context);
+    await generate({ mode: 'question', query: message, contextText: documentContent, selectedText });
     setMessage('');
   };
 

@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { VoiceSettings } from '../types';
-import { callElevenLabsTTS } from '../api/gemini';
+import { callElevenLabsTTS, callGroqTTS } from '../api/gemini';
 
 // Global voice state
 let globalVoiceState = {
@@ -26,8 +26,9 @@ export function useGlobalVoice() {
     tone: 'encouraging'
   });
 
-  // Check if ElevenLabs is available
+  // Provider availability
   const hasElevenLabs = !!(import.meta as any).env?.VITE_ELEVENLABS_API_KEY;
+  const hasGroqTts = !!(import.meta as any).env?.VITE_GROQ_API_KEY;
 
   // Stop any currently playing speech
   const stopSpeaking = useCallback(() => {
@@ -54,70 +55,76 @@ export function useGlobalVoice() {
     currentUtteranceRef.current = null;
   }, []);
 
-  // Speak using ElevenLabs with faster speed
+  const playRemoteAudio = useCallback((audioBuffer: ArrayBuffer): Promise<boolean> => {
+    const audioBlob = new Blob([audioBuffer], { type: 'audio/mpeg' });
+    const audioUrl = URL.createObjectURL(audioBlob);
+    const audio = new Audio(audioUrl);
+    audio.volume = settings.volume;
+    audio.playbackRate = settings.speed;
+    currentAudioRef.current = audio;
+    globalVoiceState.currentAudio = audio;
+
+    return new Promise((resolve) => {
+      audio.onloadeddata = () => {
+        globalVoiceState.isSpeaking = true;
+        setIsSpeaking(true);
+      };
+
+      audio.onended = () => {
+        globalVoiceState.isSpeaking = false;
+        globalVoiceState.currentAudio = null;
+        setIsSpeaking(false);
+        URL.revokeObjectURL(audioUrl);
+        currentAudioRef.current = null;
+        resolve(true);
+      };
+
+      audio.onerror = () => {
+        globalVoiceState.isSpeaking = false;
+        globalVoiceState.currentAudio = null;
+        setIsSpeaking(false);
+        URL.revokeObjectURL(audioUrl);
+        currentAudioRef.current = null;
+        resolve(false);
+      };
+
+      audio.play().catch(() => resolve(false));
+    });
+  }, [settings.volume, settings.speed]);
+
+  const speakWithGroq = useCallback(async (text: string): Promise<boolean> => {
+    if (!hasGroqTts) return false;
+    try {
+      const audioBuffer = await callGroqTTS(text, {
+        model: 'playai-tts',
+        voice: 'Aaliyah-PlayAI',
+        responseFormat: 'mp3'
+      });
+      return await playRemoteAudio(audioBuffer);
+    } catch (error) {
+      console.error('Groq TTS failed:', error);
+      return false;
+    }
+  }, [hasGroqTts, playRemoteAudio]);
+
   const speakWithElevenLabs = useCallback(async (text: string): Promise<boolean> => {
     if (!hasElevenLabs) return false;
 
     try {
       console.log('Using ElevenLabs TTS with faster speed...');
-      
-      // Use Alice voice ID from ElevenLabs (or a similar high-quality female voice)
-      const voiceId = 'Xb7hH8MSUJpSbSDYk0k2'; // Aria - high quality female voice
-      
+      const voiceId = 'Xb7hH8MSUJpSbSDYk0k2';
       const audioBuffer = await callElevenLabsTTS(text, {
         voiceId,
-        modelId: 'eleven_turbo_v2_5', // Latest fastest model
+        modelId: 'eleven_turbo_v2_5',
         stability: 0.71,
         similarityBoost: 0.5
       });
-
-      // Create audio element
-      const audioBlob = new Blob([audioBuffer], { type: 'audio/mpeg' });
-      const audioUrl = URL.createObjectURL(audioBlob);
-      const audio = new Audio(audioUrl);
-      
-      // Apply speed and volume settings
-      audio.playbackRate = settings.speed; // This applies the speed setting
-      audio.volume = settings.volume;
-      
-      currentAudioRef.current = audio;
-      globalVoiceState.currentAudio = audio;
-
-      return new Promise((resolve) => {
-        audio.onloadeddata = () => {
-          globalVoiceState.isSpeaking = true;
-          setIsSpeaking(true);
-        };
-
-        audio.onended = () => {
-          globalVoiceState.isSpeaking = false;
-          globalVoiceState.currentAudio = null;
-          setIsSpeaking(false);
-          URL.revokeObjectURL(audioUrl);
-          currentAudioRef.current = null;
-          resolve(true);
-        };
-
-        audio.onerror = () => {
-          console.error('ElevenLabs audio playback failed');
-          globalVoiceState.isSpeaking = false;
-          globalVoiceState.currentAudio = null;
-          setIsSpeaking(false);
-          URL.revokeObjectURL(audioUrl);
-          currentAudioRef.current = null;
-          resolve(false);
-        };
-
-        audio.play().catch(() => {
-          console.error('Failed to play ElevenLabs audio');
-          resolve(false);
-        });
-      });
+      return await playRemoteAudio(audioBuffer);
     } catch (error) {
       console.error('ElevenLabs TTS failed:', error);
       return false;
     }
-  }, [hasElevenLabs, settings.speed, settings.volume]);
+  }, [hasElevenLabs, playRemoteAudio]);
 
   // Fallback to browser speech synthesis
   const speakWithBrowser = useCallback((text: string): Promise<boolean> => {
@@ -186,18 +193,24 @@ export function useGlobalVoice() {
     });
   }, [isSupported, settings]);
 
-  // Main speak function - tries ElevenLabs first, then browser fallback
+  // Main speak function - tries Groq, then ElevenLabs, then browser
   const speak = useCallback(async (text: string) => {
     if (!settings.enabled || !text.trim()) return;
 
     console.log('Speaking text:', text.substring(0, 50) + '...');
+    console.log('Groq TTS available:', hasGroqTts);
     console.log('ElevenLabs available:', hasElevenLabs);
     console.log('Speed setting:', settings.speed);
 
     // Stop any current speech first
     stopSpeaking();
 
-    // Try ElevenLabs first
+    // Try Google TTS first
+    if (hasGroqTts) {
+      const ok = await speakWithGroq(text);
+      if (ok) return;
+    }
+
     if (hasElevenLabs) {
       const success = await speakWithElevenLabs(text);
       if (success) {
@@ -209,7 +222,7 @@ export function useGlobalVoice() {
 
     // Fallback to browser speech synthesis
     await speakWithBrowser(text);
-  }, [settings.enabled, hasElevenLabs, speakWithElevenLabs, speakWithBrowser, stopSpeaking]);
+  }, [settings.enabled, hasGroqTts, speakWithGroq, hasElevenLabs, speakWithElevenLabs, speakWithBrowser, stopSpeaking]);
 
   // Speak multiple paragraphs continuously
   const speakContinuous = useCallback(async (paragraphs: string[]) => {
@@ -320,7 +333,8 @@ export function useGlobalVoice() {
   useEffect(() => {
     console.log('Current voice settings:', settings);
     console.log('ElevenLabs available:', hasElevenLabs);
-  }, [settings, hasElevenLabs]);
+    console.log('Groq available:', hasGroqTts);
+  }, [settings, hasElevenLabs, hasGroqTts]);
 
   return {
     speak,
@@ -331,6 +345,7 @@ export function useGlobalVoice() {
     settings,
     updateSettings,
     isSupported,
-    hasElevenLabs
+    hasElevenLabs,
+    hasGroqTts
   };
 }

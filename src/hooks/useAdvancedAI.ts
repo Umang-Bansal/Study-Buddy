@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { AIResponse, ConceptMap, CriticalThinkingPrompt, AlternativeViewpoint, Reference, Document } from '../types';
 import { callGemini } from '../api/gemini';
+import { config } from '../config/env';
 
 export function useAdvancedAI() {
   const [isLoading, setIsLoading] = useState(false);
@@ -202,7 +203,7 @@ Return only the questions, one per line, without numbering.`;
 
   try {
     const response = await callGemini(socraticPrompt, '', {
-      model: 'gemini-2.5-flash',
+      model: config.geminiModel,
       temperature: 0.8,
       maxOutputTokens: 600
     });

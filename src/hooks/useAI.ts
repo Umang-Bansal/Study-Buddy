@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { AIResponse, Reference } from '../types';
 import { callGemini } from '../api/gemini';
+import { config } from '../config/env';
 
 // Helper function to get context around selected text
 function getContextAroundSelection(selectedText: string, fullContent: string, contextLength: number = 1200): string {
@@ -34,10 +35,10 @@ export function useAI() {
       
       let response: string;
 
-      const hasGeminiKey = !!(import.meta as any).env?.VITE_GEMINI_API_KEY;
+      const hasGeminiKey = !!config.geminiApiKey;
       if (hasGeminiKey) {
         try {
-          response = await callGemini(query, context, { model: 'gemini-1.5-flash' });
+          response = await callGemini(query, context, { model: config.geminiModel });
         } catch (err) {
           console.error('Gemini API failed, falling back to local generator', err);
           response = generateEnhancedResponse(query, context, type);

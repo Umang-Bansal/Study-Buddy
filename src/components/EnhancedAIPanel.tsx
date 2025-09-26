@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { X, Send, Bot, User, Volume2, VolumeX, Map, Brain, Lightbulb, Eye, MessageCircle, Mic, MicOff, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Document, AIResponse } from '../types';
-import { useAdvancedAI } from '../hooks/useAdvancedAI';
+import { useAssistant } from '../assistant/useAssistant';
 import { useGlobalVoice } from '../hooks/useGlobalVoice';
 import { useVoiceConversation } from '../hooks/useVoiceConversation';
 import { VoiceStatusOverlay } from './VoiceStatusOverlay';
@@ -20,9 +20,11 @@ export function EnhancedAIPanel({ document, selectedText, query, onClose, curren
   const [activeTab, setActiveTab] = useState<'chat' | 'concepts' | 'critical' | 'alternatives'>('chat');
   const [expandedResponse, setExpandedResponse] = useState<string | null>(null);
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [draftQuery, setDraftQuery] = useState('');
+  const [useExtendedContext, setUseExtendedContext] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
-  const { generateAdvancedResponse, responses, isLoading, clearResponses } = useAdvancedAI();
+  const { generate, responses, isLoading, clear: clearResponses } = useAssistant();
   const { speak, stop, isSpeaking, settings, updateSettings, isSupported } = useGlobalVoice();
   
   // Handle collapse state change
@@ -55,7 +57,14 @@ export function EnhancedAIPanel({ document, selectedText, query, onClose, curren
     try {
       console.log('Processing voice query:', voiceQuery);
       // Process the voice query through the AI system
-      const response = await generateAdvancedResponse(voiceQuery, document, selectedText, undefined, currentPage);
+      const response = await generate({
+        mode: 'chat',
+        query: voiceQuery,
+        document,
+        selectedText,
+        currentPage,
+        useExtendedContext
+      });
       
       // Speak the AI response
       if (response && response.response) {
@@ -64,7 +73,7 @@ export function EnhancedAIPanel({ document, selectedText, query, onClose, curren
     } catch (error) {
       console.error('Error processing voice message:', error);
     }
-  }, [generateAdvancedResponse, document, selectedText, speak, currentPage]);
+  }, [generate, document, selectedText, speak, currentPage, useExtendedContext]);
   
   const voiceConversation = useVoiceConversation(handleVoiceMessage);
   
@@ -83,9 +92,16 @@ export function EnhancedAIPanel({ document, selectedText, query, onClose, curren
   // Don't auto-process queries - let user control when to send them
   
   // Create direct query handler
-  const handleDirectQuery = useCallback(async (query: string) => {
+  const handleDirectQuery = useCallback(async (directQueryText: string) => {
     try {
-      const response = await generateAdvancedResponse(query, document, selectedText, undefined, currentPage);
+      const response = await generate({
+        mode: 'chat',
+        query: directQueryText,
+        document,
+        selectedText,
+        currentPage,
+        useExtendedContext
+      });
       
       // Speak the AI response for direct queries (like voice)
       if (response && response.response) {
@@ -94,7 +110,7 @@ export function EnhancedAIPanel({ document, selectedText, query, onClose, curren
     } catch (error) {
       console.error('Error processing direct query:', error);
     }
-  }, [generateAdvancedResponse, document, selectedText, currentPage, speak]);
+  }, [generate, document, selectedText, currentPage, speak, useExtendedContext]);
   
   // Process direct queries and clear them
   useEffect(() => {
@@ -433,7 +449,7 @@ export function EnhancedAIPanel({ document, selectedText, query, onClose, curren
             
             {/* Voice Status Message */}
             {voiceConversation.currentTranscript && (
-              <div className="mb-3 p-2 bg-blue-50/50 rounded-lg text-sm text-blue-700 text-center">
+              <div className="rounded-lg border border-blue-200 bg-blue-50/70 p-2 text-sm text-blue-700">
                 {voiceConversation.currentTranscript}
               </div>
             )}
@@ -450,7 +466,14 @@ export function EnhancedAIPanel({ document, selectedText, query, onClose, curren
                   <button
                     onClick={async () => {
                       try {
-                        const response = await generateAdvancedResponse(query, document, selectedText, undefined, currentPage);
+                        const response = await generate({
+                          mode: 'question',
+                          query,
+                          document,
+                          selectedText,
+                          currentPage,
+                          useExtendedContext
+                        });
                         
                         // Generate and speak response
                         if (response.response) {
@@ -469,46 +492,108 @@ export function EnhancedAIPanel({ document, selectedText, query, onClose, curren
                 </div>
               )}
 
-              {/* Voice-only message */}
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-center">
-                <div className="flex items-center justify-center gap-2 text-blue-700 mb-1">
-                  <Mic className="w-4 h-4" />
-                  <span className="font-medium text-sm">Voice-Only Mode</span>
+              {/* Text & Voice controls */}
+              <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+                <div className="mb-3 flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                    <Send className="h-4 w-4" />
+                    <span>Ask in text</span>
+                  </div>
+                  <label className="flex items-center gap-2 text-xs text-gray-500">
+                    <input
+                      type="checkbox"
+                      checked={useExtendedContext}
+                      onChange={(event) => setUseExtendedContext(event.target.checked)}
+                      className="h-3 w-3 rounded border-gray-300 text-gray-900 focus:ring-gray-900"
+                    />
+                    <span>Extended context</span>
+                  </label>
                 </div>
-                <p className="text-xs text-blue-600">
-                  Hold <kbd className="px-1 py-0.5 bg-blue-100 rounded text-xs">Ctrl+SPACEBAR</kbd> while speaking, release when done
-                </p>
+                <form
+                  onSubmit={async (event) => {
+                    event.preventDefault();
+                    const trimmed = draftQuery.trim();
+                    if (!trimmed) return;
+                    try {
+                      const response = await generate({
+                        mode: 'chat',
+                        query: trimmed,
+                        document,
+                        selectedText,
+                        currentPage,
+                        useExtendedContext
+                      });
+                      if (response.response) {
+                        handleSpeakResponse(response.response);
+                      }
+                      setDraftQuery('');
+                    } catch (error) {
+                      console.error('Error sending text question:', error);
+                    }
+                  }}
+                  className="space-y-3"
+                >
+                  <textarea
+                    value={draftQuery}
+                    onChange={(event) => setDraftQuery(event.target.value)}
+                    placeholder="Type a question or paste text to analyze"
+                    rows={3}
+                    className="w-full resize-none rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800 outline-none transition-colors focus:border-gray-400 focus:bg-white"
+                  />
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-gray-400">Tip: Shift+Enter for a new line</p>
+                    <button
+                      type="submit"
+                      disabled={isLoading || !draftQuery.trim()}
+                      className="inline-flex items-center gap-2 rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <Send className="h-3.5 w-3.5" />
+                      {isLoading ? 'Sending...' : 'Send'}
+                    </button>
+                  </div>
+                </form>
               </div>
-                
-              {/* Voice control button */}
-              <button
-                onClick={voiceConversation.toggleListening}
-                disabled={voiceConversation.isProcessing}
-                className={`w-full py-3 px-4 rounded-lg transition-all duration-200 flex items-center justify-center gap-2 font-medium ${
-                  voiceConversation.isListening 
-                    ? 'bg-red-500 hover:bg-red-600 text-white' 
-                    : voiceConversation.isProcessing
-                    ? 'bg-blue-500 text-white cursor-not-allowed'
-                    : 'bg-gray-900 hover:bg-gray-800 text-white'
-                }`}
-              >
-                {voiceConversation.isListening ? (
-                  <>
-                    <MicOff className="w-4 h-4" />
-                    <span>Stop Listening</span>
-                  </>
-                ) : voiceConversation.isProcessing ? (
-                  <>
-                    <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full"></div>
-                    <span>Processing...</span>
-                  </>
-                ) : (
-                  <>
+
+              <div className="grid gap-2 sm:grid-cols-[auto,1fr] sm:items-center">
+                <button
+                  onClick={voiceConversation.toggleListening}
+                  disabled={voiceConversation.isProcessing}
+                  className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-200 ${
+                    voiceConversation.isListening
+                      ? 'bg-red-500 hover:bg-red-600 text-white'
+                      : voiceConversation.isProcessing
+                      ? 'bg-blue-500 text-white cursor-not-allowed'
+                      : 'bg-gray-900 hover:bg-gray-800 text-white'
+                  }`}
+                >
+                  {voiceConversation.isListening ? (
+                    <>
+                      <MicOff className="w-4 h-4" />
+                      <span>Listening</span>
+                    </>
+                  ) : voiceConversation.isProcessing ? (
+                    <>
+                      <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full"></div>
+                      <span>Processing</span>
+                    </>
+                  ) : (
+                    <>
+                      <Mic className="w-4 h-4" />
+                      <span>Voice Input</span>
+                    </>
+                  )}
+                </button>
+
+                <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-700">
+                  <div className="flex items-center gap-2 font-medium">
                     <Mic className="w-4 h-4" />
-                    <span>Start Voice Input</span>
-                  </>
-                )}
-              </button>
+                    <span>Press Ctrl+SPACEBAR, then speak.</span>
+                  </div>
+                  <p className="mt-1 text-xs text-blue-600">
+                    Release to stop recording, or hit Esc to cancel.
+                  </p>
+                </div>
+              </div>
             </div>
             
             {responses.length > 0 && (

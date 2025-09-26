@@ -31,6 +31,8 @@ export function useVoiceConversation(onMessage: (message: string) => void) {
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
   
   const isSupported = 'webkitSpeechRecognition' in window || 'SpeechRecognition' in window;
+  const lastToggleRef = useRef<number>(0);
+  const TOGGLE_DEBOUNCE_MS = 400;
 
   const initializeDocument = useCallback((document: Document) => {
     documentRef.current = document;
@@ -209,6 +211,10 @@ You are a conversational study buddy. Please respond in 1-2 sentences maximum. B
 
      const startListening = useCallback(() => {
      if (!isSupported || !recognitionRef.current || !documentRef.current) return;
+     if (state.isProcessing) return;
+     const now = Date.now();
+     if (now - lastToggleRef.current < TOGGLE_DEBOUNCE_MS) return;
+     lastToggleRef.current = now;
      
      // Stop any current speech
      if (currentAudioRef.current) {
@@ -225,9 +231,12 @@ You are a conversational study buddy. Please respond in 1-2 sentences maximum. B
      } catch (error) {
        console.error('Failed to start speech recognition:', error);
      }
-   }, [isSupported]);
+   }, [isSupported, state.isProcessing]);
 
   const stopListening = useCallback(() => {
+    const now = Date.now();
+    if (now - lastToggleRef.current < TOGGLE_DEBOUNCE_MS) return;
+    lastToggleRef.current = now;
     if (recognitionRef.current) {
       recognitionRef.current.stop();
     }
@@ -250,21 +259,23 @@ You are a conversational study buddy. Please respond in 1-2 sentences maximum. B
   }, []);
 
   const toggleListening = useCallback(() => {
+    if (state.isProcessing) return;
     if (state.isListening) {
       stopListening();
     } else {
       startListening();
     }
-  }, [state.isListening, startListening, stopListening]);
+  }, [state.isListening, state.isProcessing, startListening, stopListening]);
 
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       // Ctrl+Spacebar to start recording (push-to-talk style)
       if (event.ctrlKey && event.code === 'Space' && !event.repeat) {
-        // Prevent spacebar if focused on input, textarea, or contenteditable
+        // Prevent spacebar if focused on input, textarea, select or contenteditable
         const target = event.target as HTMLElement;
-        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.contentEditable === 'true') {
+        const tag = target.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.contentEditable === 'true') {
           return;
         }
         
@@ -277,6 +288,11 @@ You are a conversational study buddy. Please respond in 1-2 sentences maximum. B
       // Ctrl+Shift+V alternative
       if (event.ctrlKey && event.shiftKey && event.key === 'V') {
         event.preventDefault();
+        const target = event.target as HTMLElement;
+        const tag = target.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.contentEditable === 'true') {
+          return;
+        }
         toggleListening();
       }
       
@@ -291,7 +307,8 @@ You are a conversational study buddy. Please respond in 1-2 sentences maximum. B
       // Stop recording when Ctrl+spacebar is released (push-to-talk style)
       if (event.ctrlKey && event.code === 'Space' && state.isListening) {
         const target = event.target as HTMLElement;
-        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.contentEditable === 'true') {
+        const tag = target.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.contentEditable === 'true') {
           return;
         }
         
@@ -326,6 +343,7 @@ You are a conversational study buddy. Please respond in 1-2 sentences maximum. B
 
   return {
     ...state,
+    isSupported,
     startListening,
     stopListening,
     stopSpeaking,

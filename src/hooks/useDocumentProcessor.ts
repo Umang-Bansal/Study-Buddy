@@ -1,6 +1,11 @@
 import { useState, useCallback } from 'react';
-import { Document, Chapter, Concept, DocumentMetadata } from '../types';
-import pdfWorker from 'pdfjs-dist/build/pdf.worker.mjs?url';
+import { Document, Chapter, Concept, DocumentMetadata, DocumentSummary, ChapterSummary } from '../types';
+import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import { computeFileHash } from '../lib/hash';
+import { getCachedDocument, setCachedDocument, setPdfBlob, getPdfBlob } from '../lib/idb';
+import { parseDocxContent } from '../lib/parsers/docx';
+import { parseEpubContent } from '../lib/parsers/epub';
+import { parsePdfContent } from '../lib/parsers/pdf';
 
 export function useDocumentProcessor() {
   const [isProcessing, setIsProcessing] = useState(false);
@@ -12,9 +17,62 @@ export function useDocumentProcessor() {
     console.log('Starting document processing for:', file.name, file.type, file.size);
 
     try {
+      // Cache check by file hash
+      const hash = await computeFileHash(file);
+      const cached = await getCachedDocument(hash);
+      if (cached) {
+        const cachedDoc = { ...(cached as Document) };
+        const needsPdfUpgrade =
+          cachedDoc.type === 'pdf' &&
+          (!Array.isArray(cachedDoc.metadata?.pageOffsets) || cachedDoc.metadata.pageOffsets.length <= 1 || !cachedDoc.content || cachedDoc.content.startsWith('# '));
+
+        if (!cachedDoc.summary && cachedDoc.content && cachedDoc.chapters?.length) {
+          try {
+            cachedDoc.summary = await generateDocumentSummary(
+              cachedDoc.content,
+              cachedDoc.chapters,
+              cachedDoc.metadata
+            );
+            const { fileData: _omitCached, ...cacheSafeWithSummary } = cachedDoc as any;
+            await setCachedDocument(hash, cacheSafeWithSummary);
+          } catch (error) {
+            console.warn('Failed to generate summary for cached document', error);
+          }
+        }
+        const isPdf = cachedDoc.type === 'pdf';
+        let hasPdfData = false;
+        try {
+          hasPdfData = !!(cachedDoc as any).fileData && ((cachedDoc as any).fileData as ArrayBuffer).byteLength > 0;
+        } catch {}
+
+        if (!needsPdfUpgrade && (!isPdf || (isPdf && hasPdfData))) {
+          console.log('Loaded document from cache');
+          setProcessingProgress(100);
+          return cachedDoc;
+        }
+
+        if (!needsPdfUpgrade && isPdf) {
+          // Try to load persisted blob for this PDF
+          const blob = await getPdfBlob(hash);
+          if (blob && blob.size > 0) {
+            console.log('Loaded PDF blob from cache store');
+            const arrayBuffer = await blob.arrayBuffer();
+            const revived: Document = { ...cachedDoc, fileData: arrayBuffer, fileBlob: blob } as Document;
+            setProcessingProgress(100);
+            return revived;
+          }
+        }
+
+        if (needsPdfUpgrade) {
+          console.log('Cached PDF lacks extracted text; reprocessing for enhanced context');
+        } else {
+          console.log('Cached PDF missing/invalid fileData; reprocessing to enable proper viewer');
+        }
+      }
+
       // Extract content based on file type
       console.log('Extracting content...');
-      const { content: rawContent, metadata, fileUrl } = await extractContent(file);
+      const { content: rawContent, metadata, fileData } = await extractContent(file);
       console.log('Content extracted, length:', rawContent.length);
       setProcessingProgress(40);
 
@@ -30,22 +88,41 @@ export function useDocumentProcessor() {
       console.log('Concepts extracted:', concepts.length);
       setProcessingProgress(75);
 
+      console.log('Generating summaries...');
+      const summary = await generateDocumentSummary(rawContent, chapters, metadata);
+      setProcessingProgress(85);
+
       // Create document object
       const document: Document = {
         id: generateId(),
         title: file.name.replace(/\.[^/.]+$/, ''),
         content: rawContent,
         type: getFileType(file.name),
-        fileUrl,
         totalWords: countWords(rawContent),
         totalPages: metadata?.totalPages,
         chapters,
         concepts,
         uploadedAt: new Date(),
-        metadata
+        metadata,
+        summary,
+        ...(getFileType(file.name) === 'pdf'
+          ? { fileBlob: file as unknown as Blob, ...(fileData ? { fileData } : {}) }
+          : { ...(fileData ? { fileData } : {}) })
       };
 
       console.log('Document created successfully:', document.title, document.totalWords, 'words');
+
+      // Persist to cache (omit large binary in doc store to avoid detaching buffers)
+      try {
+        const { fileData: _omit, ...cacheSafe } = document as any;
+        await setCachedDocument(hash, cacheSafe);
+        if (document.type === 'pdf') {
+          const blobToStore = (document as any).fileBlob as Blob | undefined;
+          if (blobToStore && blobToStore.size > 0) {
+            await setPdfBlob(hash, blobToStore);
+          }
+        }
+      } catch {}
       setProcessingProgress(100);
       return document;
     } finally {
@@ -61,7 +138,7 @@ export function useDocumentProcessor() {
   };
 }
 
-async function extractContent(file: File): Promise<{ content: string; metadata?: DocumentMetadata; fileUrl?: string }> {
+async function extractContent(file: File): Promise<{ content: string; metadata?: DocumentMetadata; fileData?: ArrayBuffer }> {
   const fileType = getFileType(file.name);
   
   switch (fileType) {
@@ -78,123 +155,56 @@ async function extractContent(file: File): Promise<{ content: string; metadata?:
   }
 }
 
-async function extractPDFContent(file: File): Promise<{ content: string; metadata: DocumentMetadata; fileUrl: string }> {
-  console.log('Processing PDF file:', file.name);
-  const fileUrl = URL.createObjectURL(file);
+async function extractPDFContent(file: File): Promise<{ content: string; metadata: DocumentMetadata; fileData: ArrayBuffer }> {
+  console.log('Processing PDF file with text extraction:', file.name);
+  const fileData = await file.arrayBuffer();
 
   try {
-    // @ts-expect-error - Vite/TS struggle with this dynamic import path but it works
-    const pdfjsLib = await import('pdfjs-dist/build/pdf.mjs');
-    pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
-
-    const loadingTask = pdfjsLib.getDocument(fileUrl);
-    const pdf = await loadingTask.promise;
-    console.log('PDF loaded, pages:', pdf.numPages);
-
-    // Extract text content for AI processing
-    let fullText = '';
-    for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-      const page = await pdf.getPage(pageNum);
-      const textContent = await page.getTextContent();
-      
-      const pageText = textContent.items
-        .map((item: any) => item.str || '')
-        .join(' ');
-      fullText += pageText + '\n\n';
-      
-      // Log progress for large documents
-      if (pdf.numPages > 10 && pageNum % 10 === 0) {
-        console.log(`Processed page ${pageNum} of ${pdf.numPages}`);
-      }
-    }
-
-    console.log('Total extracted text length:', fullText.length);
-    
-    const metadata: DocumentMetadata = { 
-      totalPages: pdf.numPages
-    };
-
-    // Return both the extracted text content AND the fileUrl
-    return { content: fullText.trim(), metadata, fileUrl };
+    const { content, metadata } = await parsePdfContent(fileData, file.name);
+    return { content, metadata, fileData };
   } catch (error) {
-    console.error('PDF processing failed:', error);
-    // Fallback content if text extraction fails
-    const fallbackContent = `# ${file.name}
-
-This PDF file could not be processed for text extraction, but you can still view it and use some AI features.
-
-Try selecting text directly from the PDF viewer below to get AI explanations.`;
-    
-    return { 
-      content: fallbackContent, 
-      fileUrl, 
-      metadata: { totalPages: 0 } 
+    console.error('PDF text extraction failed, falling back to placeholder:', error);
+    const fallbackContent = `# ${file.name}\n\n[PDF loaded. Text extraction unavailable in this session.]`;
+    return {
+      content: fallbackContent,
+      metadata: { totalPages: 0 },
+      fileData
     };
   }
 }
 
 async function extractEPUBContent(file: File): Promise<{ content: string; metadata?: DocumentMetadata }> {
-  // Enhanced EPUB fallback content
-  const content = `# ${file.name.replace('.epub', '')}
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const text = await parseEpubContent(arrayBuffer);
+    if (text.trim().length > 0) {
+      return { content: text };
+    }
+  } catch (error) {
+    console.warn('EPUB text extraction failed, using fallback content:', error);
+  }
 
-## E-Book Content
-This EPUB file has been successfully uploaded. While full EPUB parsing is not yet implemented in this demo, you can explore all the AI reading features with this enhanced content.
+  const fallback = `# ${file.name.replace('.epub', '')}
 
-## Chapter 1: Introduction
-Digital books represent the future of reading, combining traditional text with interactive features and AI-powered assistance. This format allows for dynamic content that adapts to reader preferences and learning styles.
-
-## Chapter 2: Advanced Features
-Modern e-readers provide capabilities far beyond simple text display:
-- Adaptive font sizing and spacing
-- Context-aware definitions and explanations
-- Voice synthesis for accessibility
-- Intelligent summarization and analysis
-
-## Chapter 3: Study Applications
-E-books excel in academic environments by offering:
-- Searchable content across entire libraries
-- Annotation and highlighting tools
-- Cross-referencing between related concepts
-- Progress tracking and comprehension metrics
-
-Try selecting text above to test the AI explanation features!`;
-
-  return { content };
+[EPUB text extraction unavailable. Consider converting to PDF/TXT for richer AI assistance.]`;
+  return { content: fallback };
 }
 
 async function extractDOCXContent(file: File): Promise<{ content: string; metadata?: DocumentMetadata }> {
-  // Enhanced DOCX fallback content
-  const content = `# ${file.name.replace(/\.(docx?|doc)$/i, '')}
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const text = await parseDocxContent(arrayBuffer);
+    if (text.trim().length > 0) {
+      return { content: text };
+    }
+  } catch (error) {
+    console.warn('DOCX text extraction failed, using fallback content:', error);
+  }
 
-## Document Content
-This Microsoft Word document has been uploaded successfully. The AI Study Companion provides a superior reading experience compared to traditional word processors.
+  const fallback = `# ${file.name.replace(/\.(docx?|doc)$/i, '')}
 
-## Enhanced Reading Experience
-Unlike static documents, this interface offers:
-- **Distraction-free reading**: Clean, focused text presentation
-- **AI assistance**: Contextual help and explanations
-- **Voice narration**: Professional text-to-speech capabilities
-- **Interactive concepts**: Hover and click for deeper understanding
-
-## Academic Benefits
-Transform your document reading with features like:
-- Intelligent summarization of complex passages
-- Concept mapping and relationship visualization
-- Socratic questioning to deepen comprehension
-- Cross-document knowledge integration
-
-## Sample Content for Testing
-Artificial intelligence has revolutionized document processing and analysis. Natural language processing algorithms can now understand context, extract meaning, and provide intelligent assistance to readers and researchers.
-
-**Key Technologies:**
-- Machine learning for pattern recognition
-- Neural networks for language understanding
-- Knowledge graphs for concept relationships
-- Semantic analysis for meaning extraction
-
-Select any text above to experience the AI-powered explanation system!`;
-
-  return { content };
+[Text extraction unavailable. Upload a different copy or export as PDF/TXT to enable context-aware AI responses.]`;
+  return { content: fallback };
 }
 
 async function analyzeStructure(content: string): Promise<Chapter[]> {
@@ -290,6 +300,95 @@ async function extractConcepts(content: string): Promise<Concept[]> {
   });
 
   return concepts;
+}
+
+async function generateDocumentSummary(
+  content: string,
+  chapters: Chapter[],
+  metadata?: DocumentMetadata
+): Promise<DocumentSummary | undefined> {
+  if (!content.trim()) {
+    return undefined;
+  }
+
+  const gist = buildGist(content, metadata);
+  const sections = chapters.map(chapter => buildChapterSummary(content, chapter));
+  const keywords = extractKeywords(content, 12);
+
+  return {
+    gist,
+    sections,
+    keywords,
+    generatedAt: new Date().toISOString()
+  };
+}
+
+function buildGist(content: string, metadata?: DocumentMetadata): string {
+  const paragraphs = splitIntoParagraphs(content);
+  const topParagraphs = paragraphs.slice(0, 3).join('\n\n');
+  const summary = trimTextForSummary(topParagraphs, 600);
+
+  if (metadata?.subject) {
+    return `${metadata.subject}: ${summary}`;
+  }
+
+  return summary;
+}
+
+function buildChapterSummary(content: string, chapter: Chapter): ChapterSummary {
+  const text = content.slice(chapter.startPosition, chapter.endPosition);
+  const paragraphs = splitIntoParagraphs(text);
+  const synopsis = trimTextForSummary(paragraphs.slice(0, 2).join('\n\n'), 400);
+  const keywords = extractKeywords(text, 6);
+
+  return {
+    chapterId: chapter.id,
+    title: chapter.title,
+    synopsis,
+    keywords
+  };
+}
+
+function splitIntoParagraphs(content: string): string[] {
+  return content
+    .split(/\n{2,}/)
+    .map(paragraph => paragraph.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+}
+
+function trimTextForSummary(text: string, maxChars: number): string {
+  if (text.length <= maxChars) {
+    return text;
+  }
+  return `${text.slice(0, Math.max(0, maxChars - 3)).trim()}...`;
+}
+
+function extractKeywords(content: string, limit: number): string[] {
+  const words = content
+    .toLowerCase()
+    .match(/[a-zA-Z][a-zA-Z-]{2,}/g);
+
+  if (!words) {
+    return [];
+  }
+
+  const stopWords = new Set([
+    'the', 'and', 'for', 'with', 'this', 'that', 'from', 'your', 'have', 'about',
+    'into', 'been', 'will', 'their', 'would', 'there', 'which', 'when', 'also',
+    'these', 'more', 'using', 'some', 'such', 'each'
+  ]);
+
+  const frequency = new Map<string, number>();
+  words.forEach(word => {
+    if (!stopWords.has(word) && word.length > 3) {
+      frequency.set(word, (frequency.get(word) || 0) + 1);
+    }
+  });
+
+  return Array.from(frequency.entries())
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, limit)
+    .map(([word]) => word);
 }
 
 function extractContext(text: string, position: number, length: number): string {

@@ -4,12 +4,15 @@ export interface Document {
   content: string;
   type: 'pdf' | 'epub' | 'txt' | 'docx';
   fileUrl?: string;
+  fileData?: ArrayBuffer;
+  fileBlob?: Blob;
   totalWords: number;
   totalPages?: number;
   chapters: Chapter[];
   concepts: Concept[];
   uploadedAt: Date;
   metadata?: DocumentMetadata;
+  summary?: DocumentSummary;
 }
 
 export interface DocumentMetadata {
@@ -19,6 +22,21 @@ export interface DocumentMetadata {
   creationDate?: Date;
   language?: string;
   totalPages?: number;
+  pageOffsets?: number[];
+}
+
+export interface DocumentSummary {
+  gist: string;
+  sections: ChapterSummary[];
+  keywords: string[];
+  generatedAt: string;
+}
+
+export interface ChapterSummary {
+  chapterId: string;
+  title: string;
+  synopsis: string;
+  keywords: string[];
 }
 
 export interface Chapter {
