@@ -99,22 +99,6 @@ export function DocumentUploader({ onFileUpload, isLoading, processingProgress =
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50">
-      {/* Bolt.new Badge - Top Right */}
-      <div className="fixed top-6 right-6 z-50">
-        <a 
-          href="https://bolt.new/" 
-          target="_blank" 
-          rel="noopener noreferrer"
-          className="group block hover:scale-105 transition-transform duration-300"
-        >
-          <img 
-            src="/black_circle_360x360.png" 
-            alt="Built with Bolt.new" 
-            className="w-16 h-16 shadow-lg rounded-full hover:shadow-xl transition-shadow duration-300"
-          />
-        </a>
-      </div>
-
       {/* Hero Section */}
       <div className="relative overflow-hidden">
         {/* Background Pattern */}
